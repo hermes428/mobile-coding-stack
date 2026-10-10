@@ -7,6 +7,8 @@ description: Mobile Coding Stack workflow. Use when the user types /build or ask
 
 Task: $ARGUMENTS
 
+If no task was given, read `.mcs/backlog.md` and offer the top 3 items as options; build the one the user picks and remove it from the backlog when its PR is opened.
+
 Run `python3 .claude/stack/hooks/stack.py status` first. If a contract is already APPROVED and unfinished, continue it instead of starting a new one.
 
 ## 1. Route

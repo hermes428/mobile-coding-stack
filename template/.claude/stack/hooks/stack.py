@@ -17,18 +17,21 @@ import re
 import subprocess
 import sys
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 MAX_CYCLES = 3
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 VERIFIER = "verifier"
 
-# Paths under .claude/ that are free to edit (planning artifacts).
-FREE = [".mcs/contract.md", ".mcs/lessons.md", ".mcs/archive/*"]
+# Planning artifacts: free to edit without a contract.
+FREE = [".mcs/contract.md", ".mcs/lessons.md", ".mcs/backlog.md", ".mcs/archive/*"]
 # Never editable by tools: only this script writes it.
 LOCKED = [".claude/stack/state.json"]
 # Stack machinery: editable only when approved AND explicitly listed in allowed_files.
-PROTECTED = [".claude/settings.json", ".claude/settings.local.json", ".claude/stack/*", ".mcs/*",
-             ".claude/agents/*", ".claude/skills/*"]
+# Only the stack's own files, so repos whose product is agents and skills can still build them.
+PROTECTED = [".claude/settings.json", ".claude/settings.local.json", ".claude/stack/*", ".mcs/policy.md",
+             ".claude/agents/architect.md", ".claude/agents/verifier.md",
+             ".claude/skills/build/*", ".claude/skills/verify/*", ".claude/skills/status/*",
+             ".claude/skills/scientific-rigor/*", ".claude/skills/capability-provisioning/*"]
 
 
 # ---------- paths & io ----------
@@ -216,7 +219,13 @@ def load_policy():
         "auto_max_files": max_files,
         "sensitive": SENSITIVE_DEFAULT + as_list(pol.get("sensitive")),
         "interest": as_list(pol.get("interest")),
+        "ungated": as_list(pol.get("ungated")),
     }
+
+
+def ungated(rel):
+    """User-declared paths that are always editable (e.g. a live record another session maintains)."""
+    return matches(rel, load_policy()["ungated"]) and not matches(rel, PROTECTED) and not matches(rel, LOCKED)
 
 
 def hits(rel, patterns):
@@ -394,7 +403,7 @@ def h_pre_tool(inp):
         return
     if matches(rel, LOCKED):
         return deny("state.json is written only by the stack hooks.")
-    if matches(rel, FREE):
+    if matches(rel, FREE) or ungated(rel):
         return
     if st.get("disabled"):
         return
@@ -439,7 +448,7 @@ def h_post_tool(inp):
             if msg:
                 emit({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": msg}})
             return
-        if rel is None or matches(rel, FREE) or matches(rel, LOCKED):
+        if rel is None or matches(rel, FREE) or matches(rel, LOCKED) or ungated(rel):
             return
         st["dirty"] = True
         st["edit_gen"] = st.get("edit_gen", 0) + 1

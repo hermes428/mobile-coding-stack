@@ -26,7 +26,10 @@ Claude handles tedious, low-risk work alone and brings the user in where their j
 ## Commands the user may type
 - `/build <task>` start or continue the workflow · `/status` five-line state · `/verify` independent check (`/verify deep <question>` for one hard question)
 - `approve` / `approve B` approve the contract (and pick an option) · `stack off` / `stack on` pause or resume the gates
-- The user edits `.mcs/policy.md` to tune autonomy (`autonomy: tiered|ask`, `auto_max_files`, `sensitive`, `interest`). You can't edit it without an approved contract that names it.
+- The user edits `.mcs/policy.md` to tune autonomy (`autonomy: tiered|ask`, `auto_max_files`, `sensitive`, `interest`, `ungated`). Paths under `ungated` are live records you may edit freely when that is the session's job. You can't edit it without an approved contract that names it.
 
 ## Reporting (phone-sized)
 First line: `PASS`, `FAIL`, `BLOCKED`, `PROPOSED`, or `UNRESOLVED`. Then at most ~8 short lines. Details go in the PR description, not chat.
+
+## Backlog
+Ideas raised while using the program go in `.mcs/backlog.md` (one dated line each; no contract needed). `/build` with no task offers the top items.

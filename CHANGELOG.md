@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 — 2026-10-10
+Found while installing into jean-claude-trainer, a repo whose product is agents, skills, and live coaching records.
+- `ungated:` policy list: paths always editable without a contract and excluded from verification, so a separate "use" session can keep updating live records.
+- Machinery protection narrowed to the stack's own files. Repos can now build their own `.claude/agents/` and `.claude/skills/` through normal contracts.
+- `.mcs/backlog.md` is free to write; `/build` with no task offers the top backlog items.
+
 ## 1.0.0 — 2026-10-10
 First release. A Claude Code port of Lean Build Mode v4.0, designed for mobile cloud sessions.
 

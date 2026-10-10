@@ -2,7 +2,7 @@
 # Lists use "  - item". Hooks read: allowed_files, forbidden_files, checks, depth, scientific, decisions, check_in.
 # The hook decides auto vs check-in from these fields. You can escalate (check_in: yes), never downgrade.
 id: C-001
-stack_version: 1.0.0
+stack_version: 1.0.1
 depth: fast            # fast | full
 objective: One sentence describing the single smallest next task.
 non_goals:

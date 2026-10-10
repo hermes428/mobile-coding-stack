@@ -155,6 +155,7 @@ checks:
     check("garbage input doesn't crash", out.returncode == 0)
 
     autonomy_tests()
+    v101_tests()
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 
@@ -234,6 +235,42 @@ def autonomy_tests():
     open(f"{d}/.mcs/policy.md", "w").write("autonomy: tiered\nauto_max_files: 1\n")
     out = write_contract(C(id="C-005").replace("  - src/app.py\n", "  - src/app.py\n  - src/b.py\n"))
     check("auto_max_files respected", "2 files (auto limit 1)" in out, out)
+
+
+def v101_tests():
+    print("v1.0.1: ungated paths, narrowed protection, backlog")
+    d = tempfile.mkdtemp(prefix="mcs-101-")
+    run = lambda *a: subprocess.run(a, cwd=d, capture_output=True, text=True)
+    run("git", "init", "-q"); run("git", "config", "user.email", "t@t"); run("git", "config", "user.name", "t")
+    os.makedirs(f"{d}/jean-claude"); os.makedirs(f"{d}/.claude/agents")
+    open(f"{d}/jean-claude/notes.md", "w").write("log\n")
+    open(f"{d}/.claude/agents/coach.md", "w").write("agent\n")
+    run("git", "add", "-A"); run("git", "commit", "-qm", "init")
+    subprocess.run(["bash", f"{REPO}/install.sh", d], capture_output=True)
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=d)
+    hook = f"{d}/.claude/stack/hooks/stack.py"
+    h = lambda ev, p: subprocess.run(["python3", hook, ev], input=json.dumps(dict(p, cwd=d)), capture_output=True,
+                                     text=True, env=env, cwd=d).stdout.strip()
+    edit = lambda p: h("pre-tool", {"tool_name": "Edit", "tool_input": {"file_path": f"{d}/{p}"}})
+    st = lambda: json.load(open(f"{d}/.claude/stack/state.json"))
+
+    check("live record blocked before ungating", '"deny"' in edit("jean-claude/notes.md"))
+    check("backlog is free", '"deny"' not in edit(".mcs/backlog.md"))
+    open(f"{d}/.mcs/policy.md", "w").write("autonomy: tiered\nungated:\n  - jean-claude/**\n  - .claude/stack/**\n  - .claude/agents/verifier.md\n")
+    check("ungated live record editable without contract", '"deny"' not in edit("jean-claude/notes.md"))
+    h("post-tool", {"tool_name": "Edit", "tool_input": {"file_path": f"{d}/jean-claude/notes.md"}})
+    check("ungated edit doesn't demand verification", h("stop", {}) == "")
+    check("stack hooks can't be ungated", '"deny"' in edit(".claude/stack/hooks/stack.py"))
+    check("stack verifier can't be ungated", '"deny"' in edit(".claude/agents/verifier.md"))
+    check("product agents still need a contract", '"deny"' in edit(".claude/agents/coach.md"))
+    open(f"{d}/.mcs/contract.md", "w").write("id: C-001\ndepth: fast\nobjective: o\nallowed_files:\n  - .claude/agents/*.md\nchecks:\n  - true\n")
+    h("prompt", {"prompt": "approve"})
+    check("product agents editable under a glob contract", '"deny"' not in edit(".claude/agents/coach.md"))
+    check("glob contract still can't touch stack verifier", '"deny"' in edit(".claude/agents/verifier.md"))
+    open(f"{d}/.mcs/contract.md", "w").write("id: C-002\ndepth: fast\nobjective: o\nallowed_files:\n  - .claude/agents/coach.md\nchecks:\n  - true\n")
+    h("post-tool", {"tool_name": "Bash", "tool_input": {"command": "true"}})
+    out = h("post-tool", {"tool_name": "Write", "tool_input": {"file_path": f"{d}/.mcs/contract.md"}})
+    check("1-file product agent change can auto-approve", "AUTO-APPROVED" in out or "isn't verified" in out, out)
 
 
 if __name__ == "__main__":

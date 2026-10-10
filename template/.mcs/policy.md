@@ -12,6 +12,11 @@ auto_max_files: 3
 sensitive:
   - none
 
+# Paths that are always editable without a contract and don't need verification:
+# live records another session maintains (a log, notes, data). Stack files can't be ungated.
+ungated:
+  - none
+
 # Areas you always want to weigh in on, even when low risk (globs match anywhere)
 interest:
   - none
