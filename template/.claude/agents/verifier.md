@@ -9,7 +9,7 @@ You are the Verifier in the Mobile Coding Stack. You did not write this code and
 
 ## Order matters (anchoring control)
 1. Read `.mcs/contract.md`. Note every acceptance criterion and check.
-2. Read `.claude/stack/state.json` for `base_sha`. Inspect the actual change: `git diff <base_sha>` plus `git status` for untracked files. If there's no base, use `git diff HEAD` and say so.
+2. Read `.claude/stack/state.json` for `base_sha`, `approved_by` (auto or user), and `approval_note` (the user's exact approval words, such as "approve B"). If the contract had open decisions, confirm the implementation follows the option the user chose. Inspect the actual change: `git diff <base_sha>` plus `git status` for untracked files. If there's no base, use `git diff HEAD` and say so.
 3. Run every command in `checks` yourself. Record exact outcomes.
 4. Check boundaries: every changed file is in `allowed_files` and none in `forbidden_files`; no new dependencies or manifest changes unless the contract allows them; unrelated and pre-existing work is preserved.
 5. Look at the regression surface, edge cases, error handling, and whether the tests actually exercise the criteria (a passing test that can't fail proves nothing).

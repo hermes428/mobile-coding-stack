@@ -3,21 +3,38 @@
 A lean, hook-enforced agent workflow for Claude Code, built to run from the Claude mobile app (cloud sessions). It's the successor to Lean Build Mode v4.0 (VS Code + Copilot).
 
 ```
-Understand enough → one bounded contract → you type "approve" → smallest correct change → independent verification → stop when evidence runs out
+Understand enough → one bounded contract → auto-approve or check in → smallest correct change → independent verification → stop when evidence runs out
 ```
 
-The difference from v4.0: the key rules are **enforced by hooks**, not just requested in prompts.
+Two differences from v4.0:
+
+1. **Human-aware autonomy** (after Ethan Mollick's "Twilight Factory"). Claude runs low-risk work end to end and brings you in only when your judgment changes the outcome.
+2. **Hook enforcement.** The key rules are enforced by hooks, not just requested in prompts. That includes deciding what counts as low risk, so Claude never grades its own risk.
+
+## When Claude checks in
+
+| Principle | How the stack does it |
+|---|---|
+| **Approval:** ask before risky actions | The hook auto-approves only fast, small (≤3 files by default), tested contracts that touch nothing sensitive. Secrets, auth, migrations, SQL, dependency manifests, CI, infra, and stack machinery always check in |
+| **Expertise:** involve you when judgment matters | Full-depth work, scientific changes, and any `OPEN` decision force a check-in |
+| **Variance:** bring in ideas and perspectives | Open decisions come as 2–3 distinct options with tradeoffs. You reply `approve B` |
+| **Interest:** keep you in meaningful decisions | `.mcs/policy.md` lists areas you always want to see (`interest:`), plus `autonomy: ask` if you want every contract |
+| Scope change | Revising an approved contract always checks in. So does a new contract while the previous one isn't verified PASS |
+
+What autonomy never changes: the verifier always runs, and you always merge.
+
+## What the hooks enforce
 
 | Rule | How it's enforced |
 |---|---|
-| No code edits without an approved contract | `PreToolUse` hook denies Edit/Write until you type `approve` |
+| No code edits without an approved contract | `PreToolUse` hook denies Edit/Write until the contract is auto-approved or you type `approve` |
 | Stay in scope | Edits outside `allowed_files` (or inside `forbidden_files`) are denied |
 | Scope change needs re-approval | Approval is bound to a hash of the contract; editing it re-locks edits |
 | Max 3 edit-and-check cycles | Hook counts edit → check runs; the 4th edit is denied. Re-approving the same contract doesn't reset it |
 | Verification before done | `Stop` hook won't let Claude finish with unverified edits |
 | Independent verifier | Separate read-only subagent (different model, fresh context, reads the evidence before the claims) |
 | PASS before merge to main | `gh pr merge` / `git merge` / push to main denied without a current PASS |
-| Audit trail | `.claude/stack/state.json` records approval hash, base commit, cycles, and verdict, and is committed with the PR |
+| Audit trail | `.claude/stack/state.json` records approval hash, who approved (auto or you, with your exact words), base commit, cycles, and verdict, and is committed with the PR |
 | Learn from failures | FAIL/BLOCKED verdicts and cycle-cap hits auto-append to `.mcs/lessons.md` |
 
 ## What's in a project after install
@@ -37,6 +54,7 @@ The difference from v4.0: the key rules are **enforced by hooks**, not just requ
   stack/state.json         written only by hooks
 .mcs/
   contract.md              the current contract (one phone screen)
+  policy.md                your autonomy settings (Claude can't edit it on its own)
   lessons.md               failure log, your evidence for v2
   archive/                 finished contracts
 ```
@@ -57,9 +75,9 @@ If the clone fails because this repo is private, either make it public (it conta
 
 | You type | What happens |
 |---|---|
-| `/build add CSV export to the report page` | Claude routes Fast or Full, writes `.mcs/contract.md`, and replies with a 6-line summary |
-| `approve` | Edits unlock for exactly the files in the contract |
-| *(nothing)* | Claude implements, runs checks, calls the verifier, commits, pushes, and opens a PR |
+| `/build fix the date format on the report` | Low risk: `AUTO — C-004: …`, then Claude implements, verifies, and opens a PR with no input from you |
+| `/build add CSV export to the report page` | Check-in: a 6-line summary with the hook's reasons, plus options if there's a real choice |
+| `approve` or `approve B` | Edits unlock for exactly the files in the contract, and your choice is recorded |
 | `/status` | Contract, approval, cycles, verdict, base commit |
 | `/verify deep is the unit conversion right?` | Verifier investigates only that question |
 | `stack off` / `stack on` | Pause or resume the gates (only you can do this; it's a typed prompt) |
@@ -70,6 +88,7 @@ Review and merge the PR from GitHub on your phone.
 
 - **Shell edits aren't gated.** `sed -i` or `echo >` through Bash bypass the Edit/Write gate. Governance forbids it, and the verifier checks the diff against `allowed_files`, so out-of-scope changes surface as FAIL. They just aren't blocked up front.
 - **"approve" is detected from your prompt text.** Any prompt starting with `approve` (under 200 characters) counts.
+- **Risk is judged from file paths and contract fields.** A risky change to an innocently named file in a 1-file contract can auto-approve. Add patterns to `sensitive:` or `interest:` in your policy as you learn your repo. The verifier and your PR review are the backstop.
 - **Cycle counting matches check commands by substring.** Running a check differently than written in `checks` won't count.
 - **All-Claude.** The verifier uses a different model and a fresh context, but it's not cross-vendor like the Codex/Sonnet split in v4.0.
 - **One repo per session.** Cloud sessions with several repositories don't load repo hooks.
@@ -77,7 +96,7 @@ Review and merge the PR from GitHub on your phone.
 ## Development
 
 ```
-python3 tests/test_hooks.py     # 47 end-to-end hook checks in a throwaway repo
+python3 tests/test_hooks.py     # 67 end-to-end hook checks in throwaway repos
 ```
 
 v1.0.0 was also validated against real Claude Code 2.1.296: an unapproved edit was blocked, then a two-turn `/build` → `approve` run produced a contract, one counted cycle, a verifier PASS recorded by the hook, and a commit on a contract branch.

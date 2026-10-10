@@ -20,12 +20,14 @@ Return the full text of `.mcs/contract.md`, following `.claude/stack/contract.te
 - Exactly one smallest next task. No designing for hypothetical futures.
 - `allowed_files` as narrow as possible (exact paths or tight globs).
 - Every acceptance criterion maps to at least one entry in `checks`.
+- Real judgment calls (design, data model, competing scientific models, UX tradeoffs) go in `decisions:` as `OPEN: A) … B) … C) …`, 2–3 genuinely different approaches with a one-line tradeoff each. Don't invent options for obvious choices, and don't hide real choices to look low risk.
+- Set `check_in: yes` if the user should see it even though the hook would auto-approve it.
 - `checks` are runnable shell commands (tests, scripts, linters) that decide the criteria. Write any new test as part of the task, listed in `allowed_files`.
 - Stack machinery (.claude/settings.json, .claude/stack/*, .claude/agents/*, .claude/skills/*) only by exact path and only if the task is literally about the stack.
 - Keep it under one phone screen.
 
 ## Output format (phone-sized)
 Line 1: `CONTRACT: PROPOSED` or `CONTRACT: BLOCKED`
-Then a 3–5 line plain-English summary the user can approve from a phone.
+Then a 3–5 line plain-English summary the user can approve from a phone, including any options.
 Then the contract text in one fenced block.
 If BLOCKED: name the smallest missing decision, evidence, capability, or requirement. No contract block.

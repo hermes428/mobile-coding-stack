@@ -29,6 +29,7 @@ touch "$WORK/archive/.gitkeep"
 
 # Project-owned files: created once, never overwritten.
 [ -f "$WORK/lessons.md" ] || cp "$SRC/../.mcs/lessons.md" "$WORK/lessons.md"
+[ -f "$WORK/policy.md" ]  || cp "$SRC/../.mcs/policy.md"  "$WORK/policy.md"
 
 # Merge hooks into settings.json.
 python3 - "$SRC/settings.json" "$DEST/settings.json" <<'PY'

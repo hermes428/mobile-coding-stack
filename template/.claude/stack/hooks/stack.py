@@ -171,7 +171,10 @@ def status_lines(st=None):
     if text is None:
         lines.append("Contract: none. Start with /build <task>.")
         return lines
-    lines.append(f"Contract: {c.get('id', '?')} [{cs}] {str(c.get('objective', ''))[:70]}")
+    who = f" by {st.get('approved_by')}" if cs == "APPROVED" and st.get("approved_by") else ""
+    lines.append(f"Contract: {c.get('id', '?')} [{cs}{who}] {str(c.get('objective', ''))[:70]}")
+    if cs != "APPROVED" and st.get("pending_reasons"):
+        lines.append("Check-in because: " + "; ".join(st["pending_reasons"])[:160])
     files = as_list(c.get("allowed_files"))
     lines.append(f"Depth: {c.get('depth', '?')} | Files: {', '.join(files[:4]) or '-'}{' …' if len(files) > 4 else ''}")
     lines.append(f"Cycles: {st.get('cycles', 0)}/{MAX_CYCLES} | Unchecked edits: {'yes' if st.get('dirty') else 'no'}")
@@ -184,6 +187,118 @@ def status_lines(st=None):
     if st.get("base_sha"):
         lines.append(f"Base commit: {st['base_sha'][:10]}")
     return lines
+
+
+# ---------- autonomy tiers (Twilight Factory: approval / expertise / variance / interest) ----------
+
+AUTO_MAX_FILES_DEFAULT = 3
+SENSITIVE_DEFAULT = [
+    ".env*", "*secret*", "*credential*", "*password*", "*auth*", "*/auth/*", "*migration*",
+    "*.sql", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "requirements*.txt",
+    "pyproject.toml", "poetry.lock", "uv.lock", "Pipfile*", "setup.py", "setup.cfg", "Cargo.toml",
+    "Cargo.lock", "go.mod", "go.sum", "Gemfile*", "*.gemspec", "Dockerfile*", "docker-compose*",
+    ".github/*", ".gitlab-ci*", "infra/*", "terraform/*", "*.tf", "deploy/*",
+]
+
+
+def load_policy():
+    try:
+        with open(w("policy.md")) as f:
+            pol = parse_contract(f.read())
+    except Exception:
+        pol = {}
+    try:
+        max_files = int(str(pol.get("auto_max_files", AUTO_MAX_FILES_DEFAULT)))
+    except ValueError:
+        max_files = AUTO_MAX_FILES_DEFAULT
+    return {
+        "autonomy": str(pol.get("autonomy") or "tiered").lower(),
+        "auto_max_files": max_files,
+        "sensitive": SENSITIVE_DEFAULT + as_list(pol.get("sensitive")),
+        "interest": as_list(pol.get("interest")),
+    }
+
+
+def hits(rel, patterns):
+    """Match a path or glob against patterns anywhere in the tree."""
+    base = rel.rsplit("/", 1)[-1]
+    for pat in patterns:
+        if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(base, pat) or fnmatch.fnmatch(rel, "*/" + pat):
+            return True
+    return False
+
+
+def open_decisions(c):
+    return [d for d in as_list(c.get("decisions")) if not d.upper().startswith("DECIDED")]
+
+
+def finished(st):
+    return st.get("verdict") == "PASS" and st.get("verdict_gen") == st.get("edit_gen", 0)
+
+
+def classify(c, st):
+    """Return ('auto' | 'check-in', reasons). Computed by the hook, never self-declared."""
+    pol, reasons = load_policy(), []
+    files = as_list(c.get("allowed_files"))
+    if pol["autonomy"] in ("ask", "always-ask", "off", "manual"):
+        reasons.append("policy says always ask")
+    if str(c.get("depth", "")).lower() != "fast":
+        reasons.append("full-depth work")
+    if str(c.get("scientific", "")).lower().startswith("y"):
+        reasons.append("scientific meaning affected")
+    if open_decisions(c):
+        reasons.append(f"{len(open_decisions(c))} open decision(s) need your judgment")
+    if str(c.get("check_in", "")).lower().startswith("y"):
+        reasons.append("Claude flagged it for a check-in")
+    if not as_list(c.get("checks")):
+        reasons.append("no runnable checks")
+    if len(files) > pol["auto_max_files"]:
+        reasons.append(f"{len(files)} files (auto limit {pol['auto_max_files']})")
+    if any(ch in f for f in files for ch in "*?["):
+        reasons.append("broad file globs")
+    sens = [f for f in files if hits(f, pol["sensitive"]) or matches(f, PROTECTED)]
+    if sens:
+        reasons.append("sensitive files: " + ", ".join(sens[:3]))
+    intr = [f for f in files if hits(f, pol["interest"])]
+    if intr:
+        reasons.append("your interest list: " + ", ".join(intr[:3]))
+    if st.get("approved_hash") and c.get("id") == st.get("contract_id"):
+        reasons.append("revises an already-approved contract (scope change)")
+    elif st.get("approved_hash") and st.get("edit_gen", 0) and not finished(st):
+        reasons.append(f"previous contract {st.get('contract_id')} isn't verified PASS")
+    return ("check-in" if reasons else "auto"), reasons
+
+
+def approve(st, text, by, note=""):
+    h, c = sha(text), parse_contract(text)
+    if c.get("id", "?") != st.get("contract_id"):
+        # New contract: fresh cycle budget and baseline. Same-id revisions keep their cycles.
+        st.update({"cycles": 0, "dirty": False, "edit_gen": 0, "verdict": None, "verdict_gen": None,
+                   "base_sha": git("rev-parse", "HEAD")})
+    st.update({"approved_hash": h, "contract_id": c.get("id", "?"), "approved_at": now(),
+               "approved_by": by, "approval_note": note[:200], "pending_reasons": []})
+    save_state(st)
+    return h, c
+
+
+def evaluate_contract(st):
+    """Auto-approve a low-risk proposed contract, or record why it needs a check-in."""
+    text = contract_text()
+    if text is None or st.get("approved_hash") == sha(text) or st.get("disabled"):
+        return None
+    c = parse_contract(text)
+    tier, reasons = classify(c, st)
+    if tier == "auto":
+        approve(st, text, "auto")
+        return (f"AUTO-APPROVED contract {c.get('id', '?')} (low risk: fast, {len(as_list(c.get('allowed_files')))} "
+                f"file(s), tested, nothing sensitive). Proceed now without waiting. Tell the user in one line: "
+                f"'AUTO — {c.get('id', '?')}: <objective>. Working; reply stop to halt.' The verifier and the "
+                f"user's PR merge still apply.")
+    st["pending_reasons"] = reasons
+    save_state(st)
+    return (f"CHECK-IN REQUIRED for contract {c.get('id', '?')}: " + "; ".join(reasons) +
+            ". Show the user the PROPOSED summary with these reasons (and the options for any open decision), "
+            "then wait for them to reply 'approve' (or 'approve <option>').")
 
 
 # ---------- handlers ----------
@@ -221,15 +336,9 @@ def h_prompt(inp):
     if text is None:
         print("The user typed 'approve' but there is no .mcs/contract.md to approve. Tell them.")
         return
-    h = sha(text)
-    c = parse_contract(text)
-    if st.get("approved_hash") != h:
-        # New or changed contract: fresh cycle budget and baseline.
-        st.update({"cycles": 0, "dirty": False, "edit_gen": 0, "verdict": None, "verdict_gen": None,
-                   "base_sha": git("rev-parse", "HEAD")})
-    st.update({"approved_hash": h, "contract_id": c.get("id", "?"), "approved_at": now()})
-    save_state(st)
-    print(f"The user APPROVED contract {c.get('id', '?')} (hash {h[:12]}). "
+    h, c = approve(st, text, "user", prompt)
+    print(f"The user APPROVED contract {c.get('id', '?')} (hash {h[:12]}) with: \"{prompt[:120]}\". "
+          f"If they picked an option for an open decision, implement that option. "
           f"Base commit: {st.get('base_sha') or 'none'}. Edits to allowed_files are now unlocked. "
           f"Cycles used: {st.get('cycles', 0)}/{MAX_CYCLES}. Changing contract.md will re-lock edits.")
 
@@ -295,12 +404,16 @@ def h_pre_tool(inp):
         return deny(f"No contract. Edits to {rel} are locked until a contract exists in "
                     ".mcs/contract.md and the user replies 'approve'. Use /build.")
     cs = contract_status(st, text)
+    if cs != "APPROVED":
+        evaluate_contract(st)
+        st = load_state()
+        cs = contract_status(st, text)
     if cs == "PROPOSED":
-        return deny("Contract is PROPOSED, not approved. Show the user the contract summary and ask them "
-                    "to reply 'approve'. Do not edit until they do.")
+        return deny("Contract needs a check-in: " + "; ".join(st.get("pending_reasons") or ["not approved"]) +
+                    ". Show the user the summary and reasons and wait for 'approve'.")
     if cs == "CHANGED-NEEDS-APPROVAL":
-        return deny("contract.md changed after approval. Summarize what changed and ask the user to reply "
-                    "'approve' again before editing.")
+        return deny("contract.md changed after approval (" + "; ".join(st.get("pending_reasons") or ["scope change"]) +
+                    "). Summarize what changed and ask the user to reply 'approve' again before editing.")
     c = parse_contract(text)
     allowed, forbidden = as_list(c.get("allowed_files")), as_list(c.get("forbidden_files"))
     if matches(rel, forbidden):
@@ -321,6 +434,11 @@ def h_post_tool(inp):
     tool = inp.get("tool_name", "")
     if tool in EDIT_TOOLS:
         rel = rel_to_root(target_path(inp))
+        if rel == ".mcs/contract.md":
+            msg = evaluate_contract(st)
+            if msg:
+                emit({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": msg}})
+            return
         if rel is None or matches(rel, FREE) or matches(rel, LOCKED):
             return
         st["dirty"] = True
